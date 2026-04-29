@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<title>Galería Real de Recuerdos</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Lato:wght@300;400;700&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{width:100%;height:100%;overflow:hidden;background:#f0f0f0;font-family:'Lato',sans-serif;touch-action:none;}
+
+#scene{width:100vw;height:100vh;position:relative;overflow:hidden;background:#e5e5e5;}
+canvas{position:absolute;inset:0;display:block;}
+#ui{position:absolute;inset:0;z-index:10;pointer-events:none;}
+
+/* ── PANTALLA INICIAL ────────────────────────────── */
+#title-screen{
+  position:absolute;inset:0;z-index:100;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  background:radial-gradient(circle at center, #ffffff 0%, #dcdcdc 100%);
+  transition:all 1.5s cubic-bezier(0.645, 0.045, 0.355, 1);
+  pointer-events:all;
+}
+#title-screen.out{opacity:0;visibility:hidden;transform:scale(1.1);}
+
+.ts-title{
+  font-family:'Playfair Display',serif;font-size:clamp(40px,10vw,80px);
+  color:#2a2a2a;text-align:center;margin-bottom:20px;line-height:1;
+}
+.btn-enter{
+  font-family:'Lato',sans-serif;font-size:12px;letter-spacing:.3em;
+  text-transform:uppercase;color:#fff;background:#2a2a2a;
+  border:none;padding:20px 60px;cursor:pointer;transition:all .3s;
+}
+.btn-enter:active{transform:scale(0.95);}
+
+/* ── HUD Y NAVEGACIÓN ────────────────────────────── */
+#hud-bottom{
+  position:absolute;bottom:30px;left:0;right:0;
+  display:flex;justify-content:center;align-items:center;gap:20px;
+  pointer-events:all;opacity:0;transition:opacity 1s;
+}
+#hud-bottom.show{opacity:1;}
+.nav-btn{
+  width:60px;height:60px;border-radius:50%;background:rgba(255,255,255,0.9);
+  border:1px solid #ddd;color:#333;font-size:24px;
+  display:flex;align-items:center;justify-content:center;box-shadow:0 4px 15px rgba(0,0,0,0.1);
+}
+
+#caption-box{
+  position:absolute;bottom:110px;left:50%;transform:translateX(-50%);
+  text-align:center;width:80%;max-width:400px;
+  font-family:'Playfair Display',serif;font-style:italic;color:#444;
+}
+
+/* ── ZOOM ────────────────────────────────────────── */
+#zoom-overlay{
+  position:absolute;inset:0;z-index:200;background:rgba(255,255,255,0.98);
+  display:none;align-items:center;justify-content:center;flex-direction:column;
+  padding:20px;
+}
+#zoom-overlay.open{display:flex;}
+#zoom-img{max-width:95%;max-height:70vh;box-shadow:0 20px 50px rgba(0,0,0,0.2);border:8px solid white;}
+
+/* ── PARTY ────────────────────────────────────────── */
+#party{
+  position:absolute;inset:0;z-index:300;background:#fff;
+  display:none;flex-direction:column;align-items:center;justify-content:center;text-align:center;
+}
+#party.show{display:flex;}
+</style>
+</head>
+<body>
+
+<div id="scene">
+  <canvas id="main-canvas"></canvas>
+  
+  <div id="ui">
+    <div id="title-screen">
+      <h1 class="ts-title">Le Grand<br>Musée</h1>
+      <p style="letter-spacing:4px; margin-bottom:40px; color:#888;">COLECCIÓN PERSONAL</p>
+      <button class="btn-enter" id="btn-start">Comenzar Recorrido</button>
+    </div>
+
+    <div id="caption-box">
+      <h2 id="cap-title">Bienvenido</h2>
+    </div>
+
+    <div id="hud-bottom">
+      <button class="nav-btn" id="btn-prev">←</button>
+      <button class="nav-btn" id="btn-zoom">⛶</button>
+      <button class="nav-btn" id="btn-next">→</button>
+    </div>
+  </div>
+</div>
+
+<div id="zoom-overlay">
+  <img id="zoom-img" src="" alt="Zoom"/>
+  <h2 id="zoom-text" style="margin-top:20px; font-family:'Playfair Display';"></h2>
+  <button onclick="closeZoom()" style="margin-top:30px; background:none; border:1px solid #ccc; padding:10px 20px; cursor:pointer;">Cerrar</button>
+</div>
+
+<div id="party">
+    <h1 style="font-family:'Playfair Display'; font-size:60px;">¡Feliz Cumpleaños!</h1>
+    <p id="party-msg" style="max-width:500px; padding:20px;"></p>
+    <button onclick="location.reload()" class="btn-enter">Reiniciar</button>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════
+const FOTOS = [
+  { src: 'foto1.jpg', caption: 'Un momento inolvidable' },
+  { src: 'foto2.jpg', caption: 'Risas de verano' },
+  { src: 'foto3.jpg', caption: 'Café y compañía' },
+  { src: 'foto4.jpg', caption: 'Aquel viaje especial' },
+  { src: 'foto5.jpg', caption: 'Días de sol' },
+  { src: 'foto6.jpg', caption: 'Tu sonrisa favorita' }
+];
+
+const MENSAJE_FINAL = "Que cada paso en este nuevo año de vida esté lleno de luz y momentos tan bellos como estos.";
+// ═══════════════════════════════════════════════════════════════════
+
+const canvas = document.getElementById('main-canvas');
+const ctx = canvas.getContext('2d');
+let W, H, DPR;
+
+let currentIdx = 0;
+let walkCycle = 0;
+let camZ = 0;
+let targetZ = 0;
+let isMoving = false;
+let phase = 'intro';
+
+const images = [];
+const LOADED_IMAGES = {};
+
+// Configuración de visualización
+const DEPTH_STEP = 1000; 
+const SWING_SPEED = 0.002;
+
+function resize() {
+  DPR = window.devicePixelRatio || 1;
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W * DPR;
+  canvas.height = H * DPR;
+  ctx.scale(DPR, DPR);
+}
+
+window.addEventListener('resize', resize);
+resize();
+
+// Carga de imágenes
+FOTOS.forEach((foto, i) => {
+  const img = new Image();
+  img.src = foto.src;
+  img.onload = () => LOADED_IMAGES[i] = img;
+});
+
+function drawMuseum(t) {
+  ctx.clearRect(0, 0, W, H);
+  
+  // 1. Fondo: Paredes de Mármol / Blanco Limpio
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#f8f8f8');
+  grad.addColorStop(1, '#e2e2e2');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  const vpx = W / 2;
+  const vpy = H / 2;
+  const fov = 600;
+
+  // 2. Simulación de Caminata (Head Bobbing)
+  let bobY = 0;
+  let bobX = 0;
+  if(isMoving) {
+    walkCycle += 0.12;
+    bobY = Math.sin(walkCycle) * 8; 
+    bobX = Math.cos(walkCycle * 0.5) * 4;
+  } else {
+    walkCycle *= 0.9; // Frenado suave
+    bobY = Math.sin(walkCycle) * 8;
+  }
+
+  // 3. Dibujar Cuadros (del fondo hacia adelante)
+  for (let i = FOTOS.length - 1; i >= 0; i--) {
+    const z = (i * DEPTH_STEP) - camZ;
+    if (z < -500 || z > 4000) continue;
+
+    const scale = fov / (fov + z);
+    const xBase = (i % 2 === 0 ? -W * 0.3 : W * 0.3);
+    const x = vpx + (xBase + bobX) * scale;
+    const y = vpy + (bobY - 50) * scale;
+
+    const fw = 300 * scale;
+    const fh = 400 * scale;
+
+    // Efecto de viento / balanceo
+    const swing = Math.sin(t * SWING_SPEED + i) * 0.03;
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(swing);
+
+    // Dibujar Cuerdas
+    ctx.beginPath();
+    ctx.strokeStyle = '#aaa';
+    ctx.lineWidth = 1 * scale;
+    ctx.moveTo(-fw/3, -fh/2); ctx.lineTo(0, -H);
+    ctx.moveTo(fw/3, -fh/2);  ctx.lineTo(0, -H);
+    ctx.stroke();
+
+    // Sombra
+    ctx.shadowBlur = 20 * scale;
+    ctx.shadowColor = 'rgba(0,0,0,0.15)';
+    ctx.shadowOffsetY = 15 * scale;
+
+    // Marco del cuadro
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(-fw/2 - 10*scale, -fh/2 - 10*scale, fw + 20*scale, fh + 20*scale);
+    
+    // Imagen o Placeholder
+    if(LOADED_IMAGES[i]) {
+      ctx.drawImage(LOADED_IMAGES[i], -fw/2, -fh/2, fw, fh);
+    } else {
+      ctx.fillStyle = '#eee';
+      ctx.fillRect(-fw/2, -fh/2, fw, fh);
+    }
+
+    // Brillo Volumétrico en el cuadro
+    const highlight = ctx.createLinearGradient(-fw/2, -fh/2, fw/2, fh/2);
+    highlight.addColorStop(0, 'rgba(255,255,255,0.1)');
+    highlight.addColorStop(0.5, 'rgba(255,255,255,0)');
+    highlight.addColorStop(1, 'rgba(0,0,0,0.05)');
+    ctx.fillStyle = highlight;
+    ctx.fillRect(-fw/2, -fh/2, fw, fh);
+
+    ctx.restore();
+  }
+
+  // Iluminación Global (Viñeteado suave)
+  const spot = ctx.createRadialGradient(vpx, vpy, 0, vpx, vpy, W*0.8);
+  spot.addColorStop(0, 'transparent');
+  spot.addColorStop(1, 'rgba(0,0,0,0.05)');
+  ctx.fillStyle = spot;
+  ctx.fillRect(0,0,W,H);
+}
+
+function animate(t) {
+  const diff = targetZ - camZ;
+  if (Math.abs(diff) > 0.5) {
+    camZ += diff * 0.06;
+    isMoving = true;
+  } else {
+    camZ = targetZ;
+    isMoving = false;
+  }
+
+  drawMuseum(t);
+  requestAnimationFrame(animate);
+}
+
+// Interacciones
+function updateGallery() {
+  document.getElementById('cap-title').innerText = FOTOS[currentIdx].caption;
+  targetZ = currentIdx * DEPTH_STEP;
+}
+
+document.getElementById('btn-start').onclick = () => {
+  document.getElementById('title-screen').classList.add('out');
+  document.getElementById('hud-bottom').classList.add('show');
+  phase = 'gallery';
+  updateGallery();
+};
+
+document.getElementById('btn-next').onclick = () => {
+  if (currentIdx < FOTOS.length - 1) {
+    currentIdx++;
+    updateGallery();
+  } else {
+    showParty();
+  }
+};
+
+document.getElementById('btn-prev').onclick = () => {
+  if (currentIdx > 0) {
+    currentIdx--;
+    updateGallery();
+  }
+};
+
+document.getElementById('btn-zoom').onclick = () => {
+  const overlay = document.getElementById('zoom-overlay');
+  const img = document.getElementById('zoom-img');
+  if(LOADED_IMAGES[currentIdx]) {
+    img.src = LOADED_IMAGES[currentIdx].src;
+    document.getElementById('zoom-text').innerText = FOTOS[currentIdx].caption;
+    overlay.classList.add('open');
+  }
+};
+
+function closeZoom() {
+  document.getElementById('zoom-overlay').classList.remove('open');
+}
+
+function showParty() {
+    document.getElementById('party').classList.add('show');
+    document.getElementById('party-msg').innerText = MENSAJE_FINAL;
+}
+
+// Soporte para gestos (Swipe) en móvil
+let touchStart = 0;
+window.addEventListener('touchstart', e => touchStart = e.touches[0].clientY);
+window.addEventListener('touchend', e => {
+  const touchEnd = e.changedTouches[0].clientY;
+  if(touchStart - touchEnd > 50) document.getElementById('btn-next').click();
+  if(touchStart - touchEnd < -50) document.getElementById('btn-prev').click();
+});
+
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>
